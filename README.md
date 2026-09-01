@@ -1,20 +1,21 @@
 # Gofox Single Sign-On (SSO)
 
-Enterprise login for Gofox tenants via **OIDC** and **SAML 2.0** — same product category as EngageBay’s [SSO](https://www.engagebay.com/api).
+Enterprise login for Gofox tenants via **OIDC** and **SAML 2.0**.
 
 > Sibling products: [REST API](https://github.com/gofoxcrm-ai/restapi) · [Tracking Code API](https://github.com/gofoxcrm-ai/trackingcodeapi) · [Webhooks](https://github.com/gofoxcrm-ai/webhooks)
 
+**Phased docs:** [PHASES.md](./PHASES.md)
+
 ---
 
-## Status
+## Status overview
 
-| Area | Status |
-|------|--------|
-| OIDC authorization code | ✅ Live |
-| SAML SP-initiated ACS | ✅ Live |
-| Email / domain discovery | ✅ Live |
-| SCIM provisioning | 🚧 Not yet |
-| Screenshots / IdP setup video | 🚧 Placeholders below |
+| Phase | Area | Status |
+|-------|------|--------|
+| 1 | OIDC + SAML SP-initiated | ✅ Live |
+| 2 | Discover, domain enforcement, admin fallback | ✅ Live |
+| 3 | Social Google/LinkedIn; SCIM / JIT | Social ✅ · SCIM/JIT ❌ |
+| Media | Screenshots / video | 🚧 Placeholders |
 
 Plan entitlement: **`sso`** (Prime+).
 
@@ -31,56 +32,41 @@ Client app login lives on your tenant host (e.g. `https://app.gofox.io`).
 
 ---
 
+# Phase 1 — Enterprise SSO (SAML / OIDC)
+
 ## Configure SSO
 
-1. Gofox: **Account Settings → SSO** (or Security / SSO)
+1. Gofox: **Account Settings → SSO**
 2. Choose provider type: **OIDC** or **SAML**
-3. Enter issuer, client id/secret (OIDC) or IdP metadata / cert (SAML)
-4. Optionally enforce SSO for email domains
-5. Save — users with matching domains can discover SSO on the login page
+3. Enter issuer, client id/secret (OIDC) or IdP entry point / cert / metadata (SAML)
+4. Optionally list **enforce email domains**
+5. Optionally allow **password fallback for admins**
+6. Save — matching users can discover SSO on the login page
 
-<!-- SCREENSHOT: docs/assets/sso-settings.png
-     Placeholder — SSO settings form (OIDC/SAML fields).
--->
+Settings fields (as stored): `enabled`, `provider` (`saml`|`oidc`), `issuerUrl`, `clientId`, `clientSecret`, `metadataUrl`, `domainHint`, `enforceEmailDomains[]`, `allowPasswordFallbackForAdmins`, `samlEntryPoint`, `samlIdpCert`, `notes`.
 
 ![SSO settings (placeholder)](docs/assets/sso-settings.png)
 
-<!-- VIDEO: docs/assets/sso-okta-setup.mp4
-     Placeholder — configure Okta/Azure AD → login with SSO in Gofox.
--->
-
 [IdP setup video (placeholder)](docs/assets/sso-okta-setup.mp4)
 
----
-
-## Public endpoints (working)
+## Public endpoints
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` / `POST` | `/sso/discover` | Resolve org + SSO provider from email / domain |
-| `GET` | `/sso/:orgSlug/oidc/login` | Start OIDC login |
-| `GET` | `/sso/:orgSlug/oidc/callback` | OIDC callback |
-| `GET` | `/sso/:orgSlug/saml/login` | Start SAML login |
-| `POST` | `/sso/:orgSlug/saml/callback` | SAML ACS |
-| `GET` | `/sso/:orgSlug/metadata` | SP metadata (SAML) |
+| `GET` / `POST` | `/discover` | Resolve org + SSO from email / domain |
+| `GET` | `/:orgSlug/oidc/login` | Start OIDC login |
+| `GET` | `/:orgSlug/oidc/callback` | OIDC callback (redirect URI) |
+| `GET` | `/:orgSlug/saml/login` | Start SAML login |
+| `POST` | `/:orgSlug/saml/callback` | SAML ACS |
+| `GET` | `/:orgSlug/metadata` | SP metadata XML **and Entity ID** |
+
+Full paths are under `/api/v1/public/sso/...`.
 
 Implementation: `gofox-server/src/modules/auth/public-sso.routes.ts` + `gofox-server/src/lib/sso.ts`.
 
-### Discover
-
-```bash
-curl -s -X POST "$API/sso/discover" \
-  -H "Content-Type: application/json" \
-  -d '{"email":"user@acme.com"}'
-```
-
-Typical response includes `loginUrl` pointing at OIDC or SAML login for that org.
-
----
-
 ## OIDC checklist
 
-| Item | Notes |
+| Item | Value |
 |------|-------|
 | Redirect URI | `{API_BASE_URL}/api/v1/public/sso/{orgSlug}/oidc/callback` |
 | Scopes | `openid email profile` (minimum) |
@@ -88,34 +74,88 @@ Typical response includes `loginUrl` pointing at OIDC or SAML login for that org
 
 ## SAML checklist
 
-| Item | Notes |
+| Item | Value |
 |------|-------|
 | ACS URL | `{API_BASE_URL}/api/v1/public/sso/{orgSlug}/saml/callback` |
-| Entity ID / metadata | `GET .../sso/{orgSlug}/metadata` |
+| Entity ID / metadata | `{API_BASE_URL}/api/v1/public/sso/{orgSlug}/metadata` |
 | NameID | Prefer email |
 | Signing cert | Paste IdP X.509 in Gofox settings |
 
----
-
-## Login UX
-
-1. User enters work email on Gofox login
-2. Client calls `/sso/discover`
-3. If SSO configured → redirect to IdP
-4. Callback issues Gofox session cookies / tokens
-5. Optional: enforce SSO (block password) for matched domains; admins may keep password fallback
+> **Important:** Use the **`/metadata`** URL as the SP Entity ID (matches server). Do not invent a `/saml` Entity ID path unless the product UI is updated to match.
 
 ---
 
-## Adding capabilities
+# Phase 2 — Login UX & policy
 
-| Feature | Where to extend |
-|---------|-----------------|
-| Extra OIDC claims → role mapping | `lib/sso.ts` JIT user provisioning |
-| IdP-initiated SAML | New route + relay state handling |
-| SCIM | New module under `/api/v1/scim/v2` (future) |
+## Discover
 
-Document new routes in this README when they ship.
+```bash
+curl -s -X POST "https://api.gofox.io/api/v1/public/sso/discover" \
+  -H "Content-Type: application/json" \
+  -d '{"email":"user@acme.com"}'
+```
+
+Typical response includes `loginUrl` pointing at OIDC or SAML login for that org. The Gofox login page also supports discover via query (`?email=`).
+
+## Login flow
+
+1. User enters work email on Gofox login  
+2. Client calls `/sso/discover`  
+3. If SSO configured → redirect to IdP  
+4. Callback validates assertion/tokens → `completeSsoLogin`  
+5. Session cookie + redirect to `{CLIENT_URL}/auth/callback?token=…&next=/home`
+
+## Enforcement
+
+| Rule | Behavior |
+|------|----------|
+| Matching enforce domain | Password login blocked (`SSO_REQUIRED`) |
+| Matching enforce domain | Google/LinkedIn social login blocked |
+| Self-registration | Blocked for SSO domains (`SSO_REGISTRATION_BLOCKED`) |
+| Admin fallback | If `allowPasswordFallbackForAdmins` is true, admins may still use password |
+| Membership | User **must already exist** as an active org member |
+
+### No JIT provisioning (current)
+
+Gofox does **not** auto-create users from the first SSO login. Provision the user (invite / admin create) before they sign in with the IdP, or login fails with a not-a-member style error (`SSO_NOT_MEMBER`).
+
+JIT and SCIM are Phase 3 / future work.
+
+---
+
+# Phase 3 — Related & planned
+
+## Social sign-in (not enterprise SSO)
+
+Platform OAuth buttons on the login page (separate from org SSO):
+
+| Method | Path |
+|--------|------|
+| `GET` | `/api/v1/public/auth/google` + `/callback` |
+| `GET` | `/api/v1/public/auth/linkedin` + `/callback` |
+
+Requires `GOOGLE_CLIENT_*` / `LINKEDIN_CLIENT_*` env. Domains under SSO enforcement cannot use these for login.
+
+## Planned
+
+| Feature | Notes |
+|---------|--------|
+| JIT provisioning | Create membership on first successful SSO |
+| SCIM 2.0 | Likely `/api/v1/scim/v2` |
+| IdP-initiated SAML | New route + relay state |
+| Role mapping from claims | Extend `lib/sso.ts` |
+
+Document new routes here when they ship; update [PHASES.md](./PHASES.md).
+
+---
+
+## Security notes
+
+- Never expose IdP client secrets to the browser
+- Validate ACS signatures and audience on every assertion
+- Prefer short-lived state / nonce for OIDC
+- Rotate IdP certificates before expiry
+- Set `API_BASE_URL` and `CLIENT_URL` correctly in each environment
 
 ---
 
@@ -126,15 +166,6 @@ Document new routes in this README when they ship.
 | `docs/assets/sso-settings.png` | Tenant SSO settings |
 | `docs/assets/sso-login-discover.png` | Login discover / Continue with SSO |
 | `docs/assets/sso-okta-setup.mp4` | Okta / Entra walkthrough |
-
----
-
-## Security notes
-
-- Never expose IdP client secrets to the browser
-- Validate ACS signatures and audience on every assertion
-- Prefer short-lived state / nonce for OIDC
-- Rotate IdP certificates before expiry
 
 ---
 

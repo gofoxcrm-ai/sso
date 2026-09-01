@@ -1,8 +1,7 @@
 # Media placeholders
 
-Drop screenshots (\`.png\`) and videos (\`.mp4\`) here, then remove this note from the parent README links once files exist.
-
-| Suggested file | Description |
-|---|---|
-| `sso-settings.png` | SSO settings |
-| `sso-okta-setup.mp4` | IdP walkthrough |
+| Suggested file | Phase | Description |
+|----------------|-------|-------------|
+| `sso-settings.png` | 1 | Tenant SSO settings (OIDC/SAML) |
+| `sso-login-discover.png` | 2 | Login discover / Continue with SSO |
+| `sso-okta-setup.mp4` | 1–2 | Okta / Entra end-to-end |
